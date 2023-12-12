@@ -1,0 +1,151 @@
+ques 1.	How many customers has Foodie-Fi ever had?
+
+select count(distinct customer_id) as total_customers from subscriptions;
+
+ques 2.	What is the monthly distribution of trial plan start_date values for our dataset?
+# asking for - month on month trial based subsciption i.e mom
+
+select month(start_date) as monthly, monthname(start_date) as monthly_dist, count(plan_id) as plan
+from plans
+join subscriptions
+using(plan_id)
+where plan_name= "trial"
+group by monthly, monthly_dist
+order by monthly;
+
+
+ques 3.	What plan start_date values occur after the year 2020 for our dataset? Show the breakdown by count of events for each plan_name
+
+select start_date, plan_name,
+monthname(start_date) as monthly, count(plan_name) as plan_name_counts from plans
+join subscriptions
+using(plan_id)
+where start_date> 2020
+group by plan_name
+order by monthly;
+
+ques 4. What is the customer count and percentage of customers who have churned?
+
+select
+	sum(case when plan_name="churn" then 1 else 0 end) as churn_customers,
+    sum(case when plan_name="churn" then 1 else 0 end) / count(distinct customer_id) as perc_churn
+    from subscriptions
+    join plans using(plan_id);
+    
+
+ques 5.What is the number and percentage of customer plans after their initial free trial?
+ -- (Question is asking number and percentage of customers who became paid customers after their free trial)
+  
+ # need LEAD function for upcoming data 
+ 
+with cte_newtable as(
+select * , lead(plan_name, 1) over(partition by customer_id  order by start_date)
+ as next_plan from plans
+join subscriptions
+using(plan_id))
+select plan_name, next_plan, count(customer_id) as converted,
+round((count(customer_id)/ (SELECT COUNT(DISTINCT customer_id) FROM subscriptions))*100, 1) AS perc_count
+FROM cte_newtable
+WHERE
+	plan_name = 'trial' AND next_plan IN ('basic monthly', 'pro monthly', 'pro annual')-- from trial to other all plans
+GROUP BY
+	1,2;
+
+ 
+ ques 6.How many customers have churned straight after their initial free trial and by what percentage?
+ 
+WITH new_table AS 
+ (SELECT
+	*,
+    LEAD(plan_name, 1) OVER(PARTITION BY customer_id ORDER BY start_date) AS next_plan
+FROM
+	subscriptions
+		INNER JOIN
+	plans USING(plan_id))
+SELECT
+	plan_name,
+    next_plan,
+    COUNT(customer_id) AS converted,
+    ROUND((COUNT(customer_id) / (SELECT COUNT(DISTINCT customer_id) FROM subscriptions))*100, 1) AS perc_count
+FROM 	
+	new_table
+WHERE
+	plan_name = 'trial' AND next_plan IN ('churn')--  from trail to churn
+GROUP BY
+	1,2;
+
+ques 7.	How many customers have upgraded to an annual plan in 2020?
+# subscription, count- customer unique
+# filter data- annual plan-(pro annual ie, plan id 3), 2020
+
+select count(distinct customer_id ) as cnt from 
+subscriptions 
+where plan_id = 3
+and year(start_date)= 2020 ;
+
+ques 8.How many days on average does it take for a customer to an annual plan from the day they join Foodie-Fi?
+
+WITH cte_table AS
+(SELECT
+	*,
+    LEAD(start_Date, 1) OVER(PARTITION BY customer_id ORDER BY start_date) AS rnk
+FROM
+	subscriptions
+		INNER JOIN
+	plans USING(plan_id)
+WHERE
+	plan_name IN ('trial', 'pro annual')) -- trail + annual plan 
+SELECT
+	ROUND(AVG(DATEDIFF(rnk, start_Date))) AS avg_days -- subtracting rank i.e. out output with start date, also avg
+FROM	
+	cte_table
+WHERE
+	rnk IS NOT NULL;
+
+
+ques 9.	Can you further breakdown this average value into 30 day periods (i.e. 0-30 days, 31-60 days etc)
+
+WITH new_table AS
+(SELECT
+	*,
+    LEAD(start_date, 1) OVER(PARTITION BY customer_id ORDER BY start_date) AS rnk
+FROM	
+	subscriptions
+		INNER JOIN
+	plans USING(plan_id)
+WHERE
+	plan_name IN ('trial', 'pro annual'))
+SELECT
+	CASE
+		WHEN DATEDIFF(rnk, start_date) BETWEEN 0 AND 30 THEN 'a) 0 to 30 days'
+        WHEN DATEDIFF(rnk, start_date) BETWEEN 31 AND 60 THEN 'b) 31 to 60 days'
+        WHEN DATEDIFF(rnk, start_date) BETWEEN 61 AND 90 THEN 'c) 61 to 90 days'
+        WHEN DATEDIFF(rnk, start_date) BETWEEN 91 AND 120 THEN 'd) 91 to 120 days'
+        WHEN DATEDIFF(rnk, start_date) > 120 THEN 'e) >120 days'
+        END AS days_bucket,
+        ROUND(AVG(DATEDIFF(rnk, start_date))) AS days_avg
+FROM
+	new_table
+WHERE
+	rnk IS NOT NULL
+GROUP BY -- since we created a bucket so need to group by
+	1
+ORDER BY
+	days_bucket;
+
+ques 10.	How many customers downgraded from a pro monthly to a basic monthly plan in 2020?
+
+WITH new_table AS
+(SELECT
+	*,
+    LEAD(plan_name, 1) OVER(PARTITION BY customer_id ORDER BY start_date) AS next_plan
+FROM	
+	subscriptions
+		INNER JOIN
+	plans USING(plan_id))
+SELECT
+	COUNT(DISTINCT customer_id) AS downgraded_cust
+FROM	
+	new_table
+WHERE
+	plan_name = 'pro monthly' AND next_plan = 'basic monthly' AND YEAR(next_plan) = 2020;
